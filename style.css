@@ -1,0 +1,13 @@
+body {
+    margin: 0;
+    overflow: hidden; /* Prevent scrollbars */
+    background-color: #000; /* Dark background */
+    font-family: 'Inter', sans-serif;
+    color: white;
+}
+
+canvas {
+    display: block;
+    width: 100vw; /* Viewport Width */
+    height: 100vh; /* Viewport Height */
+}
