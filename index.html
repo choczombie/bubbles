@@ -4,16 +4,41 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bubble Pop Game</title>
-    <!-- Link to the CSS file for styling the game canvas -->
     <link rel="stylesheet" href="style.css">
-    <!-- Import the P-dollar recognizer library -->
-    <script src="pdollar.js"></script>
-    <!-- Import the input handler and main game logic modules -->
-    <script type="module" src="inputHandler.js"></script>
-    <script type="module" src="main.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        .instructions {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            max-width: 220px;
+            z-index: 100;
+            backdrop-filter: blur(5px);
+        }
+        
+        canvas {
+            cursor: crosshair;
+        }
+    </style>
 </head>
 <body>
-    <!-- The canvas is where all game elements will be drawn -->
     <canvas id="gameCanvas"></canvas>
+    <div class="instructions">
+        <strong>Controls:</strong><br>
+        • Tap to pop normal bubbles<br>
+        • Draw O △ X to clear matching special bubbles<br>
+        • ESC to return to menu
+    </div>
+
+    <!-- Load P-Dollar Recognizer -->
+    <script src="pdollar.js"></script>
+
+    <!-- Load your modular game files -->
+    <script type="module" src="main.js"></script>
 </body>
 </html>
