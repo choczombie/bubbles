@@ -14,7 +14,6 @@ let visualStrokes = []; // Array to store all strokes to be drawn on the canvas.
 let previousStroke = null; // Store the previous stroke for multi-stroke recognition
 let previousStrokeEndTime = 0; // When the previous stroke ended
 let currentStrokeStartTime = 0; // When the current stroke started
-let strokeTimeout = null; // Timeout for clearing previous stroke
 
 // We will define these constants here for clarity.
 const FADE_TIME_MS = 2000; // Time in milliseconds for a stroke to fade away (2 seconds).
@@ -49,12 +48,6 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
         // Start recording points for the new stroke
         currentStroke = [new Point(x, y, 1)];
         isDrawing = true;
-
-        // Clear any pending timeouts
-        if (strokeTimeout) {
-            clearTimeout(strokeTimeout);
-            strokeTimeout = null;
-        }
     };
 
     const handlePointerMove = (event) => {
@@ -82,30 +75,52 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
         const distance = Math.sqrt(Math.pow(lastPoint.X - firstPoint.X, 2) + Math.pow(lastPoint.Y - firstPoint.Y, 2));
 
         if (currentStroke.length > 1 && distance > MIN_DRAG_DISTANCE) {
-            console.log("Stroke completed. Adding to visual queue.");
-            // This is a drawing gesture. Add the completed stroke to the visual strokes array.
-            visualStrokes.push({ points: currentStroke, startTime: Date.now() });
-            lastStrokeTime = Date.now();
+            console.log("Stroke completed. Processing recognition logic.");
             
-            // Limit the queue to the maximum number of strokes allowed for recognition.
-            if (visualStrokes.length > MAX_STROKES) {
-                visualStrokes.shift();
+            // Add current stroke to visual strokes for rendering
+            visualStrokes.push({ points: currentStroke, startTime: Date.now() });
+            
+            // Step 1: Check if we have a previous stroke within the grace period
+            const timeSinceCurrentStart = currentStrokeStartTime;
+            const hasValidPreviousStroke = previousStroke && 
+                (timeSinceCurrentStart - previousStrokeEndTime) <= MULTI_STROKE_GRACE_PERIOD_MS;
+            
+            if (hasValidPreviousStroke) {
+                console.log("Attempting multi-stroke recognition (previous + current).");
+                // Combine previous stroke and current stroke for recognition
+                const combinedStrokes = [...previousStroke, ...currentStroke];
+                
+                // Try recognition on combined strokes
+                onSymbolRecognized(combinedStrokes);
+                
+                // Always clear stroke data after attempting multi-stroke recognition
+                // The recognition function handles success/failure internally
+                console.log("Multi-stroke recognition attempted. Clearing stroke data.");
+                previousStroke = null;
+                previousStrokeEndTime = 0;
+                currentStroke = [];
+            } else {
+                // Step 2: No previous stroke exists OR outside grace period
+                console.log("Attempting single-stroke recognition (current only).");
+                // Try recognition on current stroke alone
+                onSymbolRecognized(currentStroke);
+                
+                // Step 3: Current stroke becomes the "previous stroke" for potential multi-stroke
+                console.log("Storing current stroke as previous for potential multi-stroke.");
+                previousStroke = [...currentStroke]; // Make a copy
+                previousStrokeEndTime = Date.now();
+                currentStroke = [];
+                
+                // Note: The 2-second timer is implicit - we check the time difference
+                // when the next stroke starts, so no explicit timer needed
             }
-
-            // Set a timeout to trigger recognition after the multi-stroke grace period.
-            strokeTimeout = setTimeout(() => {
-                console.log('Multi-stroke grace period ended. Attempting recognition.');
-                onSymbolRecognized(visualStrokes.flatMap(s => s.points));
-                // Clear the visual strokes array after recognition.
-                visualStrokes = [];
-            }, MULTI_STROKE_GRACE_PERIOD_MS);
 
         } else {
             console.log("Tap detected.");
-            // This is a tap.
+            // This is a tap - only pop normal bubbles, NOT special bubbles
             const x = event.type === 'touchend' ? lastPoint.X : event.clientX;
             const y = event.type === 'touchend' ? lastPoint.Y : event.clientY;
-            onPopAction(x, y);
+            onPopAction(x, y); // onPopAction now handles the special bubble filtering
 
             // Add a temporary "touch" object for visual feedback.
             visualStrokes.push({
@@ -113,7 +128,12 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
                 startTime: Date.now(),
                 isTap: true // A flag to distinguish it from a stroke.
             });
+            
+            // Clear any previous stroke data since this was just a tap
+            previousStroke = null;
+            previousStrokeEndTime = 0;
         }
+        
         currentStroke = []; // Clear the current stroke for the next input.
     };
 
@@ -152,4 +172,13 @@ export function getCurrentStroke() {
     return currentStroke;
 }
 
-		
+/**
+ * Cleans up expired visual strokes (older than FADE_TIME_MS).
+ * Should be called regularly by the main game loop.
+ */
+export function cleanupExpiredStrokes() {
+    const now = Date.now();
+    visualStrokes = visualStrokes.filter(stroke => 
+        (now - stroke.startTime) <= FADE_TIME_MS
+    );
+}
