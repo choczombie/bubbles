@@ -1,4 +1,7 @@
-// This file handles all user input for the game, including mouse, touch, and keyboard events.
+// inputHandler.js - Enhanced input handling with configurable timing parameters
+// Version: 2.1.0
+
+import { gameSettings } from './settings.js';
 
 // A simple Point class, as required by the P-dollar recognizer.
 function Point(x, y, id) {
@@ -8,55 +11,102 @@ function Point(x, y, id) {
 }
 
 // Global variables for managing input state.
-let isDrawing = false; // Flag to check if a drawing gesture is in progress.
-let currentStroke = []; // Array to store points for the current stroke.
-let visualStrokes = []; // Array to store all strokes to be drawn on the canvas.
-let previousStroke = null; // Store the previous stroke for multi-stroke recognition
-let previousStrokeEndTime = 0; // When the previous stroke ended
-let currentStrokeStartTime = 0; // When the current stroke started
+let isDrawing = false;
+let currentStroke = [];
+let visualStrokes = [];
+let previousStroke = null;
+let previousStrokeEndTime = 0;
+let currentStrokeStartTime = 0;
 
-// We will define these constants here for clarity.
-const FADE_TIME_MS = 2000; // Time in milliseconds for a stroke to fade away (2 seconds).
-const MULTI_STROKE_GRACE_PERIOD_MS = 2000; // Time to wait for a potential second stroke.
-const MIN_DRAG_DISTANCE = 5; // Minimum distance a pointer must move to be considered a drag, not a tap.
+// Input state for settings interactions
+let isDraggingSlider = false;
+
+// Constants
+const MIN_DRAG_DISTANCE = 5;
 
 /**
- * Initializes the input handler by setting up all necessary event listeners.
- * @param {HTMLCanvasElement} canvas The game canvas element.
- * @param {Function} onPopAction Callback function to execute on a tap (bubble pop).
- * @param {Function} onSymbolRecognized Callback function to execute when a symbol is recognized.
- * @param {Function} onQuitAction Callback function to execute when the game should quit.
- * @param {Function} onButtonClickAction Callback function for UI button clicks.
+ * Gets the current fade time from settings
  */
-export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitAction, onButtonClickAction) {
+function getFadeTimeMs() {
+    return gameSettings.fadeTimeMs;
+}
+
+/**
+ * Gets the current multi-stroke grace period from settings
+ */
+function getMultiStrokeGracePeriodMs() {
+    return gameSettings.multiStrokeGracePeriodMs;
+}
+
+/**
+ * Converts screen coordinates to canvas coordinates, accounting for scaling and positioning
+ */
+function getCanvasCoordinates(canvas, event) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    let clientX, clientY;
+    
+    if (event.type.startsWith('touch')) {
+        clientX = event.touches[0].clientX;
+        clientY = event.touches[0].clientY;
+    } else {
+        clientX = event.clientX;
+        clientY = event.clientY;
+    }
+    
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+/**
+ * Initializes the input handler with enhanced settings support
+ */
+export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitAction, onButtonClickAction, onSettingsInput = null) {
     // Helper function to unify mouse and touch events.
     const handlePointerDown = (event) => {
         event.preventDefault();
         console.log("Pointer down event.");
         
-        const x = event.type === 'touchstart' ? event.touches[0].clientX : event.clientX;
-        const y = event.type === 'touchstart' ? event.touches[0].clientY : event.clientY;
+        const coords = getCanvasCoordinates(canvas, event);
+        const x = coords.x;
+        const y = coords.y;
 
-        // Check for button clicks first
+        // Priority 1: Settings input (if in settings mode)
+        if (onSettingsInput && onSettingsInput(x, y, true, false)) {
+            isDraggingSlider = true;
+            return;
+        }
+
+        // Priority 2: Button clicks
         if (onButtonClickAction && onButtonClickAction(x, y)) {
-            return; // A button was clicked, so don't start a drawing or tap gesture
+            return;
         }
         
-        // Record when this stroke started
+        // Priority 3: Game interactions (drawing/tapping)
         currentStrokeStartTime = Date.now();
-        
-        // Start recording points for the new stroke
         currentStroke = [new Point(x, y, 1)];
         isDrawing = true;
     };
 
     const handlePointerMove = (event) => {
-        if (!isDrawing) return;
-
         event.preventDefault();
+        
+        const coords = getCanvasCoordinates(canvas, event);
+        const x = coords.x;
+        const y = coords.y;
 
-        const x = event.type === 'touchmove' ? event.touches[0].clientX : event.clientX;
-        const y = event.type === 'touchmove' ? event.touches[0].clientY : event.clientY;
+        // Handle settings dragging
+        if (isDraggingSlider && onSettingsInput) {
+            onSettingsInput(x, y, false, true);
+            return;
+        }
+
+        // Handle drawing
+        if (!isDrawing) return;
 
         const lastPoint = currentStroke[currentStroke.length - 1];
         const distance = Math.sqrt(Math.pow(x - lastPoint.X, 2) + Math.pow(y - lastPoint.Y, 2));
@@ -67,6 +117,16 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
     };
 
     const handlePointerUp = (event) => {
+        // Handle settings interactions
+        if (isDraggingSlider) {
+            if (onSettingsInput) {
+                const coords = getCanvasCoordinates(canvas, event);
+                onSettingsInput(coords.x, coords.y, false, false);
+            }
+            isDraggingSlider = false;
+            return;
+        }
+
         if (!isDrawing) return;
         isDrawing = false;
         
@@ -80,53 +140,42 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
             // Add current stroke to visual strokes for rendering
             visualStrokes.push({ points: currentStroke, startTime: Date.now() });
             
-            // Step 1: Check if we have a previous stroke within the grace period
+            // Multi-stroke recognition logic using configurable grace period
             const timeSinceCurrentStart = currentStrokeStartTime;
             const hasValidPreviousStroke = previousStroke && 
-                (timeSinceCurrentStart - previousStrokeEndTime) <= MULTI_STROKE_GRACE_PERIOD_MS;
+                (timeSinceCurrentStart - previousStrokeEndTime) <= getMultiStrokeGracePeriodMs();
             
             if (hasValidPreviousStroke) {
-                console.log("Attempting multi-stroke recognition (previous + current).");
-                // Combine previous stroke and current stroke for recognition
+                console.log(`Attempting multi-stroke recognition (previous + current) with grace period: ${getMultiStrokeGracePeriodMs()}ms`);
                 const combinedStrokes = [...previousStroke, ...currentStroke];
-                
-                // Try recognition on combined strokes
                 onSymbolRecognized(combinedStrokes);
                 
-                // Always clear stroke data after attempting multi-stroke recognition
-                // The recognition function handles success/failure internally
                 console.log("Multi-stroke recognition attempted. Clearing stroke data.");
                 previousStroke = null;
                 previousStrokeEndTime = 0;
                 currentStroke = [];
             } else {
-                // Step 2: No previous stroke exists OR outside grace period
                 console.log("Attempting single-stroke recognition (current only).");
-                // Try recognition on current stroke alone
                 onSymbolRecognized(currentStroke);
                 
-                // Step 3: Current stroke becomes the "previous stroke" for potential multi-stroke
                 console.log("Storing current stroke as previous for potential multi-stroke.");
-                previousStroke = [...currentStroke]; // Make a copy
+                previousStroke = [...currentStroke];
                 previousStrokeEndTime = Date.now();
                 currentStroke = [];
-                
-                // Note: The 2-second timer is implicit - we check the time difference
-                // when the next stroke starts, so no explicit timer needed
             }
 
         } else {
             console.log("Tap detected.");
-            // This is a tap - only pop normal bubbles, NOT special bubbles
-            const x = event.type === 'touchend' ? lastPoint.X : event.clientX;
-            const y = event.type === 'touchend' ? lastPoint.Y : event.clientY;
-            onPopAction(x, y); // onPopAction now handles the special bubble filtering
+            const coords = getCanvasCoordinates(canvas, event);
+            const x = coords.x;
+            const y = coords.y;
+            onPopAction(x, y);
 
-            // Add a temporary "touch" object for visual feedback.
+            // Add visual feedback for tap
             visualStrokes.push({
-                points: [{X: x, Y: y, ID: 0}], // A single point for a touch.
+                points: [{X: x, Y: y, ID: 0}],
                 startTime: Date.now(),
-                isTap: true // A flag to distinguish it from a stroke.
+                isTap: true
             });
             
             // Clear any previous stroke data since this was just a tap
@@ -134,7 +183,7 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
             previousStrokeEndTime = 0;
         }
         
-        currentStroke = []; // Clear the current stroke for the next input.
+        currentStroke = [];
     };
 
     // Set up mouse event listeners.
@@ -143,9 +192,9 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
     canvas.addEventListener('mouseup', handlePointerUp);
 
     // Set up touch event listeners.
-    canvas.addEventListener('touchstart', handlePointerDown);
-    canvas.addEventListener('touchmove', handlePointerMove);
-    canvas.addEventListener('touchend', handlePointerUp);
+    canvas.addEventListener('touchstart', handlePointerDown, { passive: false });
+    canvas.addEventListener('touchmove', handlePointerMove, { passive: false });
+    canvas.addEventListener('touchend', handlePointerUp, { passive: false });
     
     // Set up keyboard event listener for the Escape key.
     document.addEventListener('keydown', (event) => {
@@ -158,7 +207,6 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
 
 /**
  * Returns the array of visual strokes to be rendered by the main game loop.
- * @returns {Array} An array of stroke objects.
  */
 export function getVisualStrokes() {
     return visualStrokes;
@@ -166,19 +214,19 @@ export function getVisualStrokes() {
 
 /**
  * Returns the currently active stroke for live drawing.
- * @returns {Array} An array of Point objects for the current stroke.
  */
 export function getCurrentStroke() {
     return currentStroke;
 }
 
 /**
- * Cleans up expired visual strokes (older than FADE_TIME_MS).
- * Should be called regularly by the main game loop.
+ * Cleans up expired visual strokes using configurable fade time.
  */
 export function cleanupExpiredStrokes() {
     const now = Date.now();
+    const fadeTimeMs = getFadeTimeMs();
     visualStrokes = visualStrokes.filter(stroke => 
-        (now - stroke.startTime) <= FADE_TIME_MS
+        (now - stroke.startTime) <= fadeTimeMs
     );
+    console.log(`Cleaning up strokes with fade time: ${fadeTimeMs}ms, remaining strokes: ${visualStrokes.length}`);
 }
