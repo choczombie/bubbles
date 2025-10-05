@@ -1,5 +1,5 @@
 // inputHandler.js - Enhanced input handling with configurable timing parameters
-// Version: 2.1.0
+// Version: 2.1.2
 
 import { gameSettings } from './settings.js';
 
@@ -49,8 +49,10 @@ function getCanvasCoordinates(canvas, event) {
     let clientX, clientY;
     
     if (event.type.startsWith('touch')) {
-        clientX = event.touches[0].clientX;
-        clientY = event.touches[0].clientY;
+        // Use changedTouches for touchend events, touches for touchstart/touchmove
+        const touch = event.touches[0] || event.changedTouches[0];
+        clientX = touch.clientX;
+        clientY = touch.clientY;
     } else {
         clientX = event.clientX;
         clientY = event.clientY;
@@ -117,6 +119,8 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
     };
 
     const handlePointerUp = (event) => {
+        event.preventDefault();
+        
         // Handle settings interactions
         if (isDraggingSlider) {
             if (onSettingsInput) {
@@ -166,9 +170,21 @@ export function initializeInput(canvas, onPopAction, onSymbolRecognized, onQuitA
 
         } else {
             console.log("Tap detected.");
-            const coords = getCanvasCoordinates(canvas, event);
-            const x = coords.x;
-            const y = coords.y;
+            // Get coordinates for tap - need to handle touch event properly
+            let x, y;
+            if (event.type.startsWith('touch')) {
+                const touch = event.changedTouches[0];
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                x = (touch.clientX - rect.left) * scaleX;
+                y = (touch.clientY - rect.top) * scaleY;
+            } else {
+                const coords = getCanvasCoordinates(canvas, event);
+                x = coords.x;
+                y = coords.y;
+            }
+            
             onPopAction(x, y);
 
             // Add visual feedback for tap
